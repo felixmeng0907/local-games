@@ -1,4 +1,4 @@
-const CACHE_NAME = 'local-games-light-v4';
+const CACHE_NAME = 'local-games-light-v5';
 const ASSETS = [
   './index.html',
   './style.css',
