@@ -1,6 +1,6 @@
 {
-  "name": "本机小游戏",
-  "short_name": "本机小游戏",
+  "name": "小游戏",
+  "short_name": "小游戏",
   "description": "离线同屏双人五子棋",
   "start_url": "./index.html",
   "scope": "./",
