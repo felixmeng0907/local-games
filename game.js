@@ -83,23 +83,17 @@
     $('game').classList.toggle('hidden', name !== 'game');
   }
 
-  function renderLobby(filter) {
+  function renderLobby() {
     const list = $('game-list');
     list.innerHTML = '';
-    games
-      .filter((g) => filter === 'all' || g.mode === filter)
-      .forEach((g) => {
-        const card = el('button', 'game-card');
-        card.type = 'button';
-        const top = el('div', 'game-card-top');
-        top.appendChild(el('span', 'game-icon', g.icon));
-        top.appendChild(el('span', 'game-tag ' + g.mode, g.mode === 'duo' ? '双人' : '单人'));
-        card.appendChild(top);
-        card.appendChild(el('span', 'game-name', g.name));
-        card.appendChild(el('span', 'game-sub', g.sub));
-        card.addEventListener('click', () => enterGame(g.id));
-        list.appendChild(card);
-      });
+    games.forEach((g) => {
+      const card = el('button', 'game-card');
+      card.type = 'button';
+      card.appendChild(el('span', 'game-icon', g.icon));
+      card.appendChild(el('span', 'game-name', g.name));
+      card.addEventListener('click', () => enterGame(g.id));
+      list.appendChild(card);
+    });
   }
 
   function enterGame(id) {
@@ -1100,7 +1094,7 @@
   });
 
   /* ============================ 启动 ============================ */
-  renderLobby('all');
+  renderLobby();
   showScreen('lobby');
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
