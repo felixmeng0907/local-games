@@ -1,14 +1,15 @@
 :root {
-  --bg: #f7f3ec;
-  --surface: #fffdf9;
+  --bg: #f7f2e9;
+  --surface: #fffdf8;
   --surface-2: #fbf6ed;
-  --ink: #3a342c;
-  --muted: #8c8378;
-  --line: #e8e0d3;
-  --line-strong: #d8cdbc;
-  --accent: #b9874a;
-  --accent-soft: #f3e7d2;
-  --win: #c9882d;
+  --ink: #4a4038;
+  --muted: #8a7f72;
+  --line: #e7ded0;
+  --line-strong: #d9cdbb;
+  --accent: #a8c3a0;
+  --accent-dark: #8aa884;
+  --accent-soft: #e7f0e2;
+  --win: #d98e3b;
   --win-bg: #f6e6c4;
   --board-max: 980px;
 }
@@ -80,7 +81,7 @@ h1 { font-size: 32px; letter-spacing: 0.5px; }
   place-items: center;
   font-size: 34px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-dark);
   background: var(--accent-soft);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -106,7 +107,7 @@ h1 { font-size: 32px; letter-spacing: 0.5px; }
   gap: 12px;
   padding: 24px 12px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 2px solid var(--accent);
   border-radius: 14px;
   cursor: pointer;
   text-align: center;
@@ -126,7 +127,7 @@ h1 { font-size: 32px; letter-spacing: 0.5px; }
   place-items: center;
   font-size: 28px;
   line-height: 1;
-  color: var(--accent);
+  color: var(--accent-dark);
   background: var(--accent-soft);
   border-radius: 12px;
 }
@@ -167,7 +168,6 @@ h1 { font-size: 32px; letter-spacing: 0.5px; }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
 }
 
 .btn {
@@ -184,9 +184,9 @@ h1 { font-size: 32px; letter-spacing: 0.5px; }
 }
 
 .btn.primary {
-  background: var(--ink);
-  color: #fff;
-  border-color: var(--ink);
+  background: var(--accent);
+  color: var(--ink);
+  border-color: var(--accent-dark);
 }
 
 .btn.ghost {
@@ -239,8 +239,9 @@ h1 { font-size: 32px; letter-spacing: 0.5px; }
 canvas.board {
   width: 100%;
   height: 100%;
-  max-width: var(--board-max);
-  max-height: var(--board-max);
+  max-width: min(100%, var(--board-max));
+  max-height: min(100%, var(--board-max));
+  aspect-ratio: 1 / 1;
   display: block;
   touch-action: none;
 }
@@ -357,11 +358,8 @@ canvas.board {
 }
 
 @media (min-width: 700px) {
-  .screen { padding-left: 18px; padding-right: 18px; }
   .lobby-card { max-width: 680px; }
-  .game-title { font-size: 30px; }
-  .btn { min-height: 56px; font-size: 21px; padding-left: 24px; padding-right: 24px; }
-  .status-line { font-size: 24px; }
+  .game-title { font-size: 26px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
