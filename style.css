@@ -345,8 +345,9 @@ canvas.board {
   display: grid;
   gap: 8px;
   width: 100%;
-  max-width: 420px;
+  max-width: min(100%, 720px);
   aspect-ratio: 1 / 1;
+  height: auto;
   grid-auto-rows: 1fr;
 }
 
@@ -365,7 +366,7 @@ canvas.board {
 }
 
 .grid.ttt .cell {
-  font-size: 56px;
+  font-size: clamp(48px, 16vmin, 130px);
   color: var(--ink);
 }
 
@@ -563,5 +564,4 @@ canvas.board {
   .status-line { margin-top: 6px; font-size: 19px; }
   .actions { padding-top: 6px; }
   .btn { min-height: 46px; font-size: 18px; }
-  .grid.ttt .cell { font-size: 44px; }
 }
