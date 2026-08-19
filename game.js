@@ -152,13 +152,6 @@
   $('dialog-overlay').addEventListener('click', (e) => {
     if (e.target === $('dialog-overlay')) closeDialog();
   });
-  $('lobby-tabs').addEventListener('click', (e) => {
-    const btn = e.target.closest('.tab');
-    if (!btn) return;
-    $('lobby-tabs').querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-    btn.classList.add('active');
-    renderLobby(btn.dataset.tab);
-  });
 
   const Hub = {
     register(def) { games.push(def); },
@@ -312,23 +305,27 @@
     id: 'tictactoe', name: '井字棋', icon: '＃', mode: 'duo', sub: '同屏双人 · 3×3',
     build(host) {
       const status = el('div', 'status-line'); host.appendChild(status);
-      const panel = el('div', 'panel'); host.appendChild(panel);
-      const grid = el('div', 'grid ttt'); panel.appendChild(grid);
+      const wrap = el('div', 'board-wrap'); host.appendChild(wrap);
+      const grid = el('div', 'grid ttt'); wrap.appendChild(grid);
       const cells = [];
-      let board = Array(9).fill(null), turn = 'X', over = false, winCells = [];
+      let board = Array(9).fill(null), turn = 'X', over = false, winCells = [], history = [];
       for (let i = 0; i < 9; i++) {
         const c = el('button', 'cell'); c.type = 'button'; grid.appendChild(c); cells.push(c);
         c.addEventListener('click', () => move(i));
       }
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); panel.appendChild(actions);
+      const actions = el('div', 'actions');
+      const undoBtn = el('button', 'btn', '悔棋');
+      const restart = el('button', 'btn primary', '重新开始');
+      actions.append(undoBtn, restart); host.appendChild(actions);
+      undoBtn.addEventListener('click', undo);
       restart.addEventListener('click', reset);
-      function reset() { board = Array(9).fill(null); turn = 'X'; over = false; winCells = []; cells.forEach((c) => { c.textContent = ''; c.classList.remove('win'); }); update(); }
+      function reset() { board = Array(9).fill(null); turn = 'X'; over = false; winCells = []; history = []; cells.forEach((c) => { c.textContent = ''; c.classList.remove('win'); }); update(); }
       function update() {
         if (over) {
           status.textContent = winCells.length ? ('★ ' + (turn === 'X' ? '先手' : '后手') + '获胜') : '平局';
           status.style.color = winCells.length ? '#d98e3b' : '#8a7f72';
         } else { status.textContent = (turn === 'X' ? 'Ｘ 先手回合' : 'Ｏ 后手回合'); status.style.color = '#4a4038'; }
+        undoBtn.disabled = over || !history.length;
       }
       function winLine() {
         const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
@@ -337,11 +334,20 @@
       }
       function move(i) {
         if (over || board[i]) return;
+        history.push(i);
         board[i] = turn; cells[i].textContent = turn;
         const w = winLine();
         if (w) { over = true; winCells = w; w.forEach((j) => cells[j].classList.add('win')); playWin(); update(); }
         else if (board.every(Boolean)) { over = true; playLose(); update(); }
         else { turn = turn === 'X' ? 'O' : 'X'; playTap(); update(); }
+      }
+      function undo() {
+        if (over || !history.length) return;
+        const i = history.pop();
+        board[i] = null; cells[i].textContent = '';
+        turn = turn === 'X' ? 'O' : 'X';
+        winCells = [];
+        update();
       }
       reset();
       return { destroy() {} };
@@ -633,13 +639,6 @@
           });
         });
 
-        // 落点小圆
-        layout.forEach((o) => {
-          ctx.fillStyle = '#f1e2c7';
-          ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.34, 0, Math.PI * 2); ctx.fill();
-          ctx.strokeStyle = '#a97c50'; ctx.lineWidth = 1; ctx.stroke();
-        });
-
         const selKey = sel ? key(sel[0], sel[1], sel[2]) : null;
         if (selKey && pos[selKey]) {
           ctx.strokeStyle = '#d98e3b'; ctx.lineWidth = 4;
@@ -676,350 +675,7 @@
     }
   });
 
-  /* ============================ 5. 记忆翻牌 ============================ */
-  Hub.register({
-    id: 'memory', name: '记忆翻牌', icon: '🃏', mode: 'duo', sub: '双人轮流 · 比谁配对多',
-    build(host) {
-      const EMOJI = ['●', '■', '▲', '◆', '★', '♥', '♠', '♦'];
-      const status = el('div', 'status-line'); host.appendChild(status);
-      const hud = el('div', 'hud'); host.appendChild(hud);
-      const p1 = el('div', 'hud-box', ''); const p2 = el('div', 'hud-box', '');
-      hud.append(p1, p2);
-      const panel = el('div', 'panel'); host.appendChild(panel);
-      const grid = el('div', 'grid mem'); panel.appendChild(grid);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); panel.appendChild(actions); restart.addEventListener('click', reset);
-      let cards = [], flipped = [], score = [0, 0], cur = 0, locked = false;
-      function reset() {
-        const deck = EMOJI.concat(EMOJI).sort(() => Math.random() - 0.5);
-        cards = deck.map((s, i) => ({ s, i, matched: false }));
-        flipped = []; score = [0, 0]; cur = 0; locked = false;
-        grid.innerHTML = '';
-        cards.forEach((card, idx) => {
-          const c = el('button', 'cell'); c.type = 'button';
-          c.addEventListener('click', () => flip(idx)); grid.appendChild(c); card.node = c;
-        });
-        render(); update();
-      }
-      function update() {
-        p1.innerHTML = '红方<b>' + score[0] + '</b>';
-        p2.innerHTML = '蓝方<b>' + score[1] + '</b>';
-        status.textContent = (cur === 0 ? '● 红方' : '○ 蓝方') + '回合';
-      }
-      function render() {
-        cards.forEach((card) => {
-          const open = card.matched || flipped.includes(card.i);
-          card.node.textContent = open ? card.s : '';
-          card.node.classList.toggle('flipped', open);
-          card.node.classList.toggle('matched', card.matched);
-        });
-      }
-      function flip(i) {
-        if (locked || cards[i].matched || flipped.includes(i)) return;
-        flipped.push(i); playTap(); render();
-        if (flipped.length === 2) {
-          locked = true;
-          const [a, b] = flipped;
-          if (cards[a].s === cards[b].s) {
-            setTimeout(() => {
-              cards[a].matched = cards[b].matched = true; score[cur]++; flipped = [];
-              if (cards.every((c) => c.matched)) { playWin(); update(); render(); dialog(score[0] > score[1] ? '红方获胜' : (score[1] > score[0] ? '蓝方获胜' : '平局'), '红 ' + score[0] + ' : 蓝 ' + score[1], { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame }); return; }
-              locked = false; update(); render();
-            }, 320);
-          } else {
-            setTimeout(() => {
-              flipped = []; cur = 1 - cur; locked = false; update(); render();
-            }, 750);
-          }
-        }
-      }
-      reset();
-      return { destroy() {} };
-    }
-  });
-
-  /* ============================ 6. 猜数字 ============================ */
-  Hub.register({
-    id: 'guess', name: '猜数字', icon: '❓', mode: 'solo', sub: '单人 · 猜4位数字（几A几B）',
-    build(host) {
-      const status = el('div', 'status-line'); host.appendChild(status);
-      const rules = el('div', 'controls-note', '电脑想好 4 位不重复数字（1-9）。你输入 4 个数字后点「确定」：A＝数字和位置都对，B＝数字对但位置错。10 次内猜中即胜。');
-      host.appendChild(rules);
-      const panel = el('div', 'panel'); host.appendChild(panel);
-      const row = el('div', 'guess-row'); panel.appendChild(row);
-      const hist = el('div', 'guess-history'); panel.appendChild(hist);
-      const pad = el('div', 'num-pad'); panel.appendChild(pad);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); panel.appendChild(actions); restart.addEventListener('click', reset);
-      let secret = [], input = [], attempts = 0, over = false;
-      function newSecret() {
-        const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5).slice(0, 4);
-        return digits;
-      }
-      function reset() {
-        secret = newSecret(); input = []; attempts = 0; over = false; hist.innerHTML = '';
-        row.textContent = ''; update();
-      }
-      function update() {
-        if (over) status.textContent = '🎉 猜中了！';
-        else status.textContent = '输入 4 位不重复数字 · 第 ' + (attempts + 1) + '/10 次';
-        row.textContent = input.join(' ') || '（点击下方数字输入）';
-      }
-      function submit() {
-        if (over || input.length !== 4 || new Set(input).size !== 4) { playLose(); return; }
-        let a = 0, b = 0;
-        input.forEach((d, i) => { if (d === secret[i]) a++; else if (secret.includes(d)) b++; });
-        attempts++;
-        const line = el('div', 'guess-line');
-        line.appendChild(el('span', '', input.join('')));
-        line.appendChild(el('span', 'fb', a + 'A' + b + 'B'));
-        hist.appendChild(line);
-        if (a === 4) { over = true; playWin(); update(); dialog('猜中了', '答案就是 ' + secret.join('') + '，用了 ' + attempts + ' 次。', { confirm: '再来一局', onConfirm: reset }); return; }
-        if (attempts >= 10) { over = true; playLose(); update(); dialog('没猜中', '答案是 ' + secret.join('') + '。', { confirm: '再来一局', onConfirm: reset }); return; }
-        input = []; playTap(); update();
-      }
-      for (let d = 0; d <= 9; d++) {
-        const k = el('button', 'btn small key', String(d)); k.type = 'button';
-        k.addEventListener('click', () => {
-          if (over || input.length >= 4 || input.includes(d)) return;
-          input.push(d); playTap(); update();
-        });
-        pad.appendChild(k);
-      }
-      const clear = el('button', 'btn small key', '⌫'); clear.type = 'button';
-      clear.addEventListener('click', () => { if (!over) { input.pop(); playTap(); update(); } });
-      const ok = el('button', 'btn small key primary', '确定'); ok.type = 'button';
-      ok.addEventListener('click', submit);
-      pad.append(clear, ok);
-      reset();
-      return { destroy() {} };
-    }
-  });
-
-  /* ============================ 7. 2048 ============================ */
-  Hub.register({
-    id: 'n2048', name: '2048', icon: '２', mode: 'solo', sub: '单人 · 滑动合并',
-    build(host) {
-      const hud = el('div', 'hud'); host.appendChild(hud);
-      const scoreBox = el('div', 'hud-box', ''); hud.appendChild(scoreBox);
-      const status = el('div', 'status-line'); host.appendChild(status);
-      const panel = el('div', 'panel'); host.appendChild(panel);
-      const grid = el('div', 'grid n2048'); panel.appendChild(grid);
-      const cells = [];
-      for (let i = 0; i < 16; i++) { const c = el('div', 'cell'); grid.appendChild(c); cells.push(c); }
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); panel.appendChild(actions); restart.addEventListener('click', reset);
-      let board = [], score = 0, over = false, won = false;
-      let sx = 0, sy = 0;
-      function reset() { board = Array(16).fill(0); score = 0; over = false; won = false; spawn(); spawn(); render(); }
-      function spawn() {
-        const empty = board.map((v, i) => v === 0 ? i : -1).filter((i) => i >= 0);
-        if (!empty.length) return;
-        const i = empty[Math.floor(Math.random() * empty.length)];
-        board[i] = Math.random() < 0.9 ? 2 : 4;
-      }
-      function slide(arr) {
-        let a = arr.filter(Boolean), gained = 0;
-        for (let i = 0; i < a.length - 1; i++) if (a[i] === a[i + 1]) { a[i] *= 2; gained += a[i]; a.splice(i + 1, 1); }
-        while (a.length < 4) a.push(0);
-        return { arr: a, gained };
-      }
-      function move(dir) {
-        if (over) return;
-        let changed = false, gained = 0;
-        for (let i = 0; i < 4; i++) {
-          let line = [], src = [];
-          for (let j = 0; j < 4; j++) {
-            const idx = dir === 'left' ? i * 4 + j : dir === 'right' ? i * 4 + (3 - j) : dir === 'up' ? j * 4 + i : (3 - j) * 4 + i;
-            line.push(board[idx]); src.push(idx);
-          }
-          const res = slide(line); gained += res.gained;
-          src.forEach((idx, j) => { if (board[idx] !== res.arr[j]) changed = true; board[idx] = res.arr[j]; });
-        }
-        if (!changed) return;
-        score += gained; spawn();
-        if (board.includes(2048) && !won) { won = true; playWin(); dialog('达成 2048', '继续挑战更高分！', { confirm: '继续', onConfirm: closeDialog }); }
-        if (!movesLeft()) { over = true; playLose(); dialog('游戏结束', '没有可移动的格子了，得分 ' + score + '。', { confirm: '再来一局', onConfirm: reset }); }
-        render();
-      }
-      function movesLeft() {
-        if (board.includes(0)) return true;
-        for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
-          const v = board[r * 4 + c];
-          if (c < 3 && board[r * 4 + c + 1] === v) return true;
-          if (r < 3 && board[(r + 1) * 4 + c] === v) return true;
-        }
-        return false;
-      }
-      function render() {
-        scoreBox.innerHTML = '得分<b>' + score + '</b>';
-        status.textContent = over ? '游戏结束' : (won ? '已达成 2048，继续…' : '滑动合并到 2048');
-        board.forEach((v, i) => {
-          cells[i].textContent = v || '';
-          cells[i].className = 'cell' + (v ? ' t' + v : '');
-        });
-      }
-      function swiper() {
-        grid.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
-        grid.addEventListener('touchend', (e) => {
-          const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-          if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
-          move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
-        }, { passive: true });
-      }
-      function key(e) {
-        const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
-        if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
-      }
-      swiper();
-      window.addEventListener('keydown', key);
-      reset();
-      return { destroy() { window.removeEventListener('keydown', key); } };
-    }
-  });
-
-  /* ============================ 9. 贪吃蛇 ============================ */
-  Hub.register({
-    id: 'snake', name: '贪吃蛇', icon: '🐍', mode: 'solo', sub: '单人 · 环面地图',
-    build(host) {
-      const COLS = 16, ROWS = 12;
-      const hud = el('div', 'hud'); host.appendChild(hud);
-      const scoreBox = el('div', 'hud-box', ''); hud.appendChild(scoreBox);
-      const status = el('div', 'status-line'); host.appendChild(status);
-      const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
-      const actions = el('div', 'actions');
-      const restart = el('button', 'btn primary', '重新开始'); actions.appendChild(restart); host.appendChild(actions);
-      const note = el('div', 'controls-note', '在棋盘上滑动，或用键盘方向键控制'); host.appendChild(note);
-      restart.addEventListener('click', reset);
-      const { ctx, resize, destroy } = canvasGame(canvas, draw);
-      let snake = [], dir = [1, 0], nextDir = [1, 0], food = [0, 0], score = 0, over = false, timer = null;
-      let tx = 0, ty = 0;
-      function reset() {
-        snake = [[Math.floor(COLS / 2), Math.floor(ROWS / 2)]];
-        dir = [1, 0]; nextDir = [1, 0]; score = 0; over = false;
-        placeFood(); clearInterval(timer);
-        timer = setInterval(tick, 150);
-        update(); draw();
-      }
-      function placeFood() {
-        do {
-          food = [Math.floor(Math.random() * COLS), Math.floor(Math.random() * ROWS)];
-        } while (snake.some(([x, y]) => x === food[0] && y === food[1]));
-      }
-      function tick() {
-        if (over) return;
-        dir = nextDir;
-        let [hx, hy] = snake[0];
-        let nx = hx + dir[0], ny = hy + dir[1];
-        nx = (nx + COLS) % COLS; ny = (ny + ROWS) % ROWS;
-        const tail = snake[snake.length - 1];
-        const willGrow = nx === food[0] && ny === food[1];
-        const body = willGrow ? snake : snake.slice(0, -1);
-        if (body.some(([x, y]) => x === nx && y === ny)) { over = true; playLose(); clearInterval(timer); update(); draw(); dialog('游戏结束', '撞到自己了，得分 ' + score + '。', { confirm: '再来一局', onConfirm: reset }); return; }
-        snake.unshift([nx, ny]);
-        if (willGrow) { score++; playPlace(); placeFood(); } else snake.pop();
-        update(); draw();
-      }
-      function update() {
-        scoreBox.innerHTML = '得分<b>' + score + '</b>';
-        status.textContent = over ? '游戏结束' : '长度 ' + snake.length;
-      }
-      function draw() {
-        const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
-        ctx.clearRect(0, 0, w, h);
-        const cell = Math.min(w / COLS, h / ROWS);
-        const bw = cell * COLS, bh = cell * ROWS;
-        const ox = (w - bw) / 2, oy = (h - bh) / 2;
-        ctx.fillStyle = '#eaf1e6'; ctx.fillRect(ox, oy, bw, bh);
-        ctx.strokeStyle = 'rgba(0,0,0,0.05)'; ctx.lineWidth = 1;
-        for (let x = 1; x < COLS; x++) { ctx.beginPath(); ctx.moveTo(ox + x * cell, oy); ctx.lineTo(ox + x * cell, oy + bh); ctx.stroke(); }
-        for (let y = 1; y < ROWS; y++) { ctx.beginPath(); ctx.moveTo(ox, oy + y * cell); ctx.lineTo(ox + bw, oy + y * cell); ctx.stroke(); }
-        ctx.fillStyle = '#d98e3b'; ctx.beginPath(); ctx.arc(ox + food[0] * cell + cell / 2, oy + food[1] * cell + cell / 2, cell * 0.32, 0, Math.PI * 2); ctx.fill();
-        snake.forEach(([x, y], i) => {
-          ctx.fillStyle = i === 0 ? '#3f7a52' : '#5ea06a';
-          ctx.fillRect(ox + x * cell + 1, oy + y * cell + 1, cell - 2, cell - 2);
-        });
-      }
-      function swipe(e) {
-        const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
-        if (Math.max(Math.abs(dx), Math.abs(dy)) < 18) return;
-        let d;
-        if (Math.abs(dx) > Math.abs(dy)) d = dx > 0 ? [1, 0] : [-1, 0]; else d = dy > 0 ? [0, 1] : [0, -1];
-        if (d[0] !== -dir[0] || d[1] !== -dir[1]) nextDir = d;
-      }
-      canvas.addEventListener('touchstart', (e) => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
-      canvas.addEventListener('touchend', swipe, { passive: true });
-      function key(e) {
-        const map = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-        if (map[e.key]) { e.preventDefault(); const d = map[e.key]; if (d[0] !== -dir[0] || d[1] !== -dir[1]) nextDir = d; }
-      }
-      window.addEventListener('keydown', key);
-      reset();
-      return { destroy() { clearInterval(timer); window.removeEventListener('keydown', key); } };
-    }
-  });
-
-  /* ============================ 10. 反应对战 ============================ */
-  Hub.register({
-    id: 'reaction', name: '反应对战', icon: '⚡', mode: 'duo', sub: '同屏双人 · 看谁手快',
-    build(host) {
-      const WIN = 5;
-      const status = el('div', 'status-line'); host.appendChild(status);
-      const hud = el('div', 'hud'); host.appendChild(hud);
-      const p1 = el('div', 'hud-box', ''); const p2 = el('div', 'hud-box', ''); hud.append(p1, p2);
-      const arena = el('div', 'reaction'); host.appendChild(arena);
-      const zone = el('div', 'reaction-arena'); arena.appendChild(zone);
-      const z1 = el('div', 'reaction-zone p1', '红方\n点这里'); const z2 = el('div', 'reaction-zone p2', '蓝方\n点这里');
-      zone.append(z1, z2);
-      const target = el('div', 'reaction-target', '●'); zone.appendChild(target);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
-      let score = [0, 0], state = 'ready', timeout = null, flashTimer = null;
-      function reset() {
-        score = [0, 0]; state = 'ready'; clearTimeout(timeout); clearTimeout(flashTimer);
-        target.style.display = 'none'; render(); arm();
-      }
-      function arm() {
-        state = 'ready';
-        status.textContent = '准备…看到圆点就点自己的区域';
-        target.style.display = 'none';
-        timeout = setTimeout(() => {
-          state = 'go';
-          status.textContent = '⚡ 快抢！';
-          target.style.display = 'grid';
-          flashTimer = setTimeout(() => { if (state === 'go') miss(); }, 1200);
-        }, 800 + Math.random() * 1600);
-      }
-      function hit(p) {
-        if (state === 'ready') {
-          score[p] = Math.max(0, score[p] - 1);
-          clearTimeout(timeout); render(); status.textContent = (p === 0 ? '红方' : '蓝方') + '抢跑 -1，重新来';
-          setTimeout(arm, 700); return;
-        }
-        if (state !== 'go') return;
-        state = 'over';
-        clearTimeout(flashTimer);
-        score[p]++; playTap(); render();
-        target.style.display = 'none';
-        if (score[p] >= WIN) { playWin(); status.textContent = (p === 0 ? '红方' : '蓝方') + '获胜！'; dialog((p === 0 ? '红方' : '蓝方') + '获胜', '红 ' + score[0] + ' : 蓝 ' + score[1], { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame }); }
-        else { status.textContent = (p === 0 ? '红方' : '蓝方') + ' +1 分！'; setTimeout(arm, 700); }
-      }
-      function miss() {
-        state = 'over'; target.style.display = 'none';
-        status.textContent = '都慢了，重新来'; setTimeout(arm, 700);
-      }
-      function render() {
-        p1.innerHTML = '红方<b>' + score[0] + '</b>';
-        p2.innerHTML = '蓝方<b>' + score[1] + '</b>';
-      }
-      z1.addEventListener('pointerdown', (e) => { e.preventDefault(); hit(0); });
-      z2.addEventListener('pointerdown', (e) => { e.preventDefault(); hit(1); });
-      reset();
-      return { destroy() { clearTimeout(timeout); clearTimeout(flashTimer); } };
-    }
-  });
-
-  /* ============================ 11. 中国象棋 ============================ */
+  /* ============================ 5. 中国象棋 ============================ */
   Hub.register({
     id: 'xiangqi', name: '中国象棋', icon: '帅', mode: 'duo', sub: '同屏双人 · 9×10',
     build(host) {
@@ -1250,7 +906,7 @@
     }
   });
 
-  /* ============================ 12. 国际象棋 ============================ */
+  /* ============================ 6. 国际象棋 ============================ */
   Hub.register({
     id: 'chess', name: '国际象棋', icon: '♞', mode: 'duo', sub: '同屏双人 · 8×8',
     build(host) {
