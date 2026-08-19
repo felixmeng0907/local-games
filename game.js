@@ -354,15 +354,20 @@
     build(host) {
       const N = 8, EMPTY = -1, BLACK = 0, WHITE = 1;
       const state = { board: [], cur: BLACK, over: false };
+      let history = [];
       const status = el('div', 'status-line'); host.appendChild(status);
       const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
+      const actions = el('div', 'actions');
+      const undoBtn = el('button', 'btn', '悔棋');
+      const restart = el('button', 'btn primary', '重新开始');
+      actions.append(undoBtn, restart); host.appendChild(actions);
+      undoBtn.addEventListener('click', undo);
+      restart.addEventListener('click', reset);
       const { ctx, resize, destroy } = canvasGame(canvas, draw);
       function reset() {
         state.board = Array.from({ length: N }, () => Array(N).fill(EMPTY));
         state.board[3][3] = WHITE; state.board[4][4] = WHITE; state.board[3][4] = BLACK; state.board[4][3] = BLACK;
-        state.cur = BLACK; state.over = false; update(); draw();
+        state.cur = BLACK; state.over = false; history = []; update(); draw();
       }
       function flips(r, c, p) {
         if (state.board[r][c] !== EMPTY) return [];
@@ -382,6 +387,7 @@
       }
       function place(r, c) {
         const f = flips(r, c, state.cur); if (!f.length) return;
+        history.push({ r: r, c: c, flipped: f, cur: state.cur });
         state.board[r][c] = state.cur; f.forEach(([rr, cc]) => state.board[rr][cc] = state.cur);
         state.cur = 1 - state.cur;
         if (!movesFor(state.cur).length) {
@@ -394,10 +400,19 @@
           dialog(b > w ? '黑方获胜' : (w > b ? '白方获胜' : '平局'), '黑 ' + b + '  :  白 ' + w, { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame });
         }
       }
+      function undo() {
+        if (state.over || !history.length) return;
+        const m = history.pop();
+        state.board[m.r][m.c] = EMPTY;
+        m.flipped.forEach(([rr, cc]) => { state.board[rr][cc] = 1 - m.cur; });
+        state.cur = m.cur; state.over = false;
+        update(); draw();
+      }
       function update() {
         let b = 0, w = 0; state.board.forEach(row => row.forEach(v => { if (v === BLACK) b++; if (v === WHITE) w++; }));
         if (state.over) status.textContent = '终局 · 黑 ' + b + ' : 白 ' + w;
         else status.textContent = (state.cur === BLACK ? '● 黑方' : '○ 白方') + '回合 · 黑 ' + b + ' : 白 ' + w;
+        undoBtn.disabled = state.over || !history.length;
       }
       function draw() {
         const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
@@ -440,8 +455,12 @@
       const note = el('div', 'controls-note', '点击自己的棋子选中，再点亮起的位置移动（可连跳，不吞子）。先把全部棋子走到对面营地者胜。');
       const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
       host.appendChild(note);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
+      const actions = el('div', 'actions');
+      const undoBtn = el('button', 'btn', '悔棋');
+      const restart = el('button', 'btn primary', '重新开始');
+      actions.append(undoBtn, restart); host.appendChild(actions);
+      undoBtn.addEventListener('click', undo);
+      restart.addEventListener('click', reset);
       const { ctx, resize, destroy } = canvasGame(canvas, draw);
 
       const key = (x, y, z) => x + ',' + y + ',' + z;
@@ -481,7 +500,7 @@
         });
       }
 
-      let pieces = {}, cur = 0, sel = null, steps = [], jumps = [], over = false, layout = [];
+      let pieces = {}, cur = 0, sel = null, steps = [], jumps = [], over = false, layout = [], history = [];
       const toCell = (k) => k.split(',').map(Number);
       const isEmpty = (k) => pieces[k] === undefined;
 
@@ -490,7 +509,7 @@
         buildBoard();
         START[0].forEach((k) => { pieces[k] = 0; });
         START[1].forEach((k) => { pieces[k] = 1; });
-        cur = 0; sel = null; steps = []; jumps = []; over = false;
+        cur = 0; sel = null; steps = []; jumps = []; over = false; history = [];
         update(); draw();
       }
 
@@ -546,6 +565,7 @@
           if (!j) return;
           delete pieces[sk]; pieces[targetKey] = cur;
         }
+        history.push({ from: sk, to: targetKey, cur: cur });
         sel = null; steps = []; jumps = [];
         if (won(cur)) {
           over = true; playWin(); update(); draw();
@@ -555,8 +575,19 @@
         cur = 1 - cur; playTap(); update(); draw();
       }
 
+      function undo() {
+        if (over || !history.length) return;
+        const m = history.pop();
+        const p = pieces[m.to];
+        delete pieces[m.to];
+        pieces[m.from] = p;
+        cur = m.cur; sel = null; steps = []; jumps = [];
+        update(); draw();
+      }
+
       function update() {
         status.textContent = over ? '对局结束' : ((cur === 0 ? '● 红方' : '○ 蓝方') + '回合 · 把棋子走到对面营地');
+        undoBtn.disabled = over || !history.length;
       }
 
       function computeLayout() {
@@ -564,8 +595,9 @@
         const raw = [];
         boardSet.forEach((k) => {
           const c = toCell(k);
-          const px = Math.sqrt(3) * (c[0] + c[2] / 2);
-          const py = 1.5 * c[2];
+          // 旋转后让两个营地正好一上一下（正对手机屏幕上下）
+          const px = Math.sqrt(3) * (c[0] / 2 + c[2]);
+          const py = -1.5 * c[0];
           raw.push({ k, c, px, py });
         });
         const xs = raw.map((o) => o.px), ys = raw.map((o) => o.py);
@@ -576,7 +608,7 @@
         const scale = Math.min((w - PAD * 2) / bw, (h - PAD * 2) / bh);
         const ox = (w - bw * scale) / 2 - minX * scale;
         const oy = (h - bh * scale) / 2 - minY * scale;
-        layout = raw.map((o) => ({ k: o.k, x: o.px * scale + ox, y: o.py * scale + oy, r: scale * 0.42 }));
+        layout = raw.map((o) => ({ k: o.k, c: o.c, x: o.px * scale + ox, y: o.py * scale + oy, r: scale * 0.68 }));
       }
 
       function draw() {
@@ -585,24 +617,42 @@
         ctx.clearRect(0, 0, w, h);
         const pos = {};
         layout.forEach((o) => { pos[o.k] = o; });
+
+        // 网格线（连接相邻落点）
+        const drawn = new Set();
+        ctx.strokeStyle = '#a97c50'; ctx.lineWidth = 1.2;
         layout.forEach((o) => {
-          ctx.fillStyle = '#d8c49a';
-          ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+          DIRS.forEach((d) => {
+            const n = add(o.c, d);
+            const nk = key(n[0], n[1], n[2]);
+            if (!pos[nk]) return;
+            const e = o.k < nk ? o.k + '|' + nk : nk + '|' + o.k;
+            if (drawn.has(e)) return;
+            drawn.add(e);
+            ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(pos[nk].x, pos[nk].y); ctx.stroke();
+          });
+        });
+
+        // 落点小圆
+        layout.forEach((o) => {
+          ctx.fillStyle = '#f1e2c7';
+          ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.34, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = '#a97c50'; ctx.lineWidth = 1; ctx.stroke();
         });
+
         const selKey = sel ? key(sel[0], sel[1], sel[2]) : null;
         if (selKey && pos[selKey]) {
           ctx.strokeStyle = '#d98e3b'; ctx.lineWidth = 4;
-          ctx.beginPath(); ctx.arc(pos[selKey].x, pos[selKey].y, pos[selKey].r * 1.25, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(pos[selKey].x, pos[selKey].y, pos[selKey].r * 1.15, 0, Math.PI * 2); ctx.stroke();
         }
-        steps.forEach((k) => { const o = pos[k]; if (o) { ctx.fillStyle = 'rgba(217,142,59,0.65)'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.55, 0, Math.PI * 2); ctx.fill(); } });
-        jumps.forEach((path) => { const o = pos[path[path.length - 1]]; if (o) { ctx.strokeStyle = 'rgba(217,142,59,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.6, 0, Math.PI * 2); ctx.stroke(); } });
+        steps.forEach((k) => { const o = pos[k]; if (o) { ctx.fillStyle = 'rgba(217,142,59,0.65)'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.52, 0, Math.PI * 2); ctx.fill(); } });
+        jumps.forEach((path) => { const o = pos[path[path.length - 1]]; if (o) { ctx.strokeStyle = 'rgba(217,142,59,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.56, 0, Math.PI * 2); ctx.stroke(); } });
         layout.forEach((o) => {
           const p = pieces[o.k];
           if (p === undefined) return;
           ctx.fillStyle = p === 0 ? '#c9573f' : '#5b86c5';
           ctx.strokeStyle = '#4a4038'; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.96, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         });
       }
 
@@ -977,11 +1027,15 @@
       const CH = { k: ['帅', '将'], a: ['仕', '士'], e: ['相', '象'], h: ['马', '马'], r: ['车', '车'], c: ['炮', '炮'], p: ['兵', '卒'] };
       const status = el('div', 'status-line'); host.appendChild(status);
       const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
+      const actions = el('div', 'actions');
+      const undoBtn = el('button', 'btn', '悔棋');
+      const restart = el('button', 'btn primary', '重新开始');
+      actions.append(undoBtn, restart); host.appendChild(actions);
+      undoBtn.addEventListener('click', undo);
+      restart.addEventListener('click', reset);
       const { ctx, resize, destroy } = canvasGame(canvas, draw);
 
-      let board = [], turn = 'r', sel = null, selMoves = [], over = false, lastMove = null, checkPos = null;
+      let board = [], turn = 'r', sel = null, selMoves = [], over = false, lastMove = null, checkPos = null, history = [];
       const P = (type, color) => ({ type, color });
       const other = (s) => (s === 'r' ? 'b' : 'r');
       const inB = (r, c) => r >= 0 && r < R && c >= 0 && c < C;
@@ -994,7 +1048,7 @@
         board[2][1] = P('c', 'b'); board[2][7] = P('c', 'b');
         board[7][1] = P('c', 'r'); board[7][7] = P('c', 'r');
         for (let c = 0; c < C; c += 2) { board[3][c] = P('p', 'b'); board[6][c] = P('p', 'r'); }
-        turn = 'r'; sel = null; selMoves = []; over = false; lastMove = null; checkPos = null;
+        turn = 'r'; sel = null; selMoves = []; over = false; lastMove = null; checkPos = null; history = [];
         update(); draw();
       }
 
@@ -1094,6 +1148,8 @@
         const [fr, fc] = sel;
         if (!selMoves.some(([r, c]) => r === tr && c === tc)) return;
         const p = board[fr][fc];
+        const captured = board[tr][tc];
+        history.push({ from: [fr, fc], to: [tr, tc], piece: { type: p.type, color: p.color }, captured: captured ? { type: captured.type, color: captured.color } : null, turn: turn });
         board[tr][tc] = p; board[fr][fc] = null; lastMove = [fr, fc, tr, tc];
         sel = null; selMoves = [];
         turn = other(turn);
@@ -1108,7 +1164,20 @@
         playTap(); update(); draw();
       }
 
+      function undo() {
+        if (over || !history.length) return;
+        const m = history.pop();
+        board[m.from[0]][m.from[1]] = { type: m.piece.type, color: m.piece.color };
+        board[m.to[0]][m.to[1]] = m.captured ? { type: m.captured.type, color: m.captured.color } : null;
+        turn = m.turn; sel = null; selMoves = [];
+        const lm = history[history.length - 1];
+        lastMove = lm ? [lm.from[0], lm.from[1], lm.to[0], lm.to[1]] : null;
+        checkPos = inCheck(board, turn) ? findGeneral(board, turn) : null;
+        update(); draw();
+      }
+
       function update() {
+        undoBtn.disabled = over || !history.length;
         if (over) { status.textContent = '对局结束'; return; }
         status.textContent = (turn === 'r' ? '红方' : '黑方') + '回合' + (checkPos ? ' · 将军！' : '');
         status.style.color = checkPos ? '#d98e3b' : '#4a4038';
@@ -1189,11 +1258,15 @@
       const LETTER = { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N', p: 'P' };
       const status = el('div', 'status-line'); host.appendChild(status);
       const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
-      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
-      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
+      const actions = el('div', 'actions');
+      const undoBtn = el('button', 'btn', '悔棋');
+      const restart = el('button', 'btn primary', '重新开始');
+      actions.append(undoBtn, restart); host.appendChild(actions);
+      undoBtn.addEventListener('click', undo);
+      restart.addEventListener('click', reset);
       const { ctx, resize, destroy } = canvasGame(canvas, draw);
 
-      let board = [], turn = 'w', sel = null, selMoves = [], over = false, lastMove = null, checkPos = null;
+      let board = [], turn = 'w', sel = null, selMoves = [], over = false, lastMove = null, checkPos = null, history = [];
       const P = (type, color) => ({ type, color });
       const other = (s) => (s === 'w' ? 'b' : 'w');
       const inB = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
@@ -1202,7 +1275,7 @@
         board = Array.from({ length: N }, () => Array(N).fill(null));
         const back = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
         for (let c = 0; c < N; c++) { board[0][c] = P(back[c], 'b'); board[7][c] = P(back[c], 'w'); board[1][c] = P('p', 'b'); board[6][c] = P('p', 'w'); }
-        turn = 'w'; sel = null; selMoves = []; over = false; lastMove = null; checkPos = null;
+        turn = 'w'; sel = null; selMoves = []; over = false; lastMove = null; checkPos = null; history = [];
         update(); draw();
       }
 
@@ -1283,6 +1356,8 @@
         const [fr, fc] = sel;
         if (!selMoves.some(([r, c]) => r === tr && c === tc)) return;
         const p = board[fr][fc];
+        const captured = board[tr][tc];
+        history.push({ from: [fr, fc], to: [tr, tc], piece: { type: p.type, color: p.color }, captured: captured ? { type: captured.type, color: captured.color } : null, turn: turn });
         board[tr][tc] = p; board[fr][fc] = null;
         if (p.type === 'p' && (tr === 0 || tr === 7)) { p.type = 'q'; }
         lastMove = [fr, fc, tr, tc];
@@ -1299,7 +1374,20 @@
         playTap(); update(); draw();
       }
 
+      function undo() {
+        if (over || !history.length) return;
+        const m = history.pop();
+        board[m.from[0]][m.from[1]] = { type: m.piece.type, color: m.piece.color };
+        board[m.to[0]][m.to[1]] = m.captured ? { type: m.captured.type, color: m.captured.color } : null;
+        turn = m.turn; sel = null; selMoves = [];
+        const lm = history[history.length - 1];
+        lastMove = lm ? [lm.from[0], lm.from[1], lm.to[0], lm.to[1]] : null;
+        checkPos = inCheck(board, turn) ? findKing(board, turn) : null;
+        update(); draw();
+      }
+
       function update() {
+        undoBtn.disabled = over || !history.length;
         if (over) { status.textContent = '对局结束'; return; }
         status.textContent = (turn === 'w' ? '白方' : '黑方') + '回合' + (checkPos ? ' · 将军！' : '');
         status.style.color = checkPos ? '#d98e3b' : '#4a4038';
