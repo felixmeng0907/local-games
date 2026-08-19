@@ -604,11 +604,11 @@
         const minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
         const minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
         const bw = maxX - minX || 1, bh = maxY - minY || 1;
-        const PAD = 24;
+        const PAD = 18;
         const scale = Math.min((w - PAD * 2) / bw, (h - PAD * 2) / bh);
         const ox = (w - bw * scale) / 2 - minX * scale;
         const oy = (h - bh * scale) / 2 - minY * scale;
-        layout = raw.map((o) => ({ k: o.k, c: o.c, x: o.px * scale + ox, y: o.py * scale + oy, r: scale * 0.68 }));
+        layout = raw.map((o) => ({ k: o.k, c: o.c, x: o.px * scale + ox, y: o.py * scale + oy, r: scale * 0.72 }));
       }
 
       function draw() {
