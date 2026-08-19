@@ -472,9 +472,7 @@
     build(host) {
       const DIRS = [[1, -1, 0], [1, 0, -1], [0, 1, -1], [-1, 1, 0], [-1, 0, 1], [0, -1, 1]];
       const status = el('div', 'status-line'); host.appendChild(status);
-      const note = el('div', 'controls-note', '点击自己的棋子选中，再点亮起的位置移动（可连跳，不吞子）。先把全部棋子走到对面营地者胜。');
       const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
-      host.appendChild(note);
       const actions = el('div', 'actions');
       const undoBtn = el('button', 'btn', '悔棋');
       const restart = el('button', 'btn primary', '重新开始');
