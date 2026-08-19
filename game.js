@@ -431,137 +431,195 @@
     }
   });
 
-  /* ============================ 4. 国际跳棋 ============================ */
+  /* ============================ 4. 中国跳棋 ============================ */
   Hub.register({
-    id: 'checkers', name: '国际跳棋', icon: '◈', mode: 'duo', sub: '同屏双人 · 8×8',
+    id: 'chinesecheckers', name: '中国跳棋', icon: '✳', mode: 'duo', sub: '同屏双人 · 跳到对方营地',
     build(host) {
-      const N = 8;
-      const state = { board: [], cur: 0, sel: null, targets: [], over: false };
+      const DIRS = [[1, -1, 0], [1, 0, -1], [0, 1, -1], [-1, 1, 0], [-1, 0, 1], [0, -1, 1]];
       const status = el('div', 'status-line'); host.appendChild(status);
+      const note = el('div', 'controls-note', '点击自己的棋子选中，再点亮起的位置移动（可连跳，不吞子）。先把全部棋子走到对面营地者胜。');
       const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
+      host.appendChild(note);
       const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
       actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
       const { ctx, resize, destroy } = canvasGame(canvas, draw);
-      function inB(r, c) { return r >= 0 && r < N && c >= 0 && c < N; }
-      function reset() {
-        state.board = Array.from({ length: N }, () => Array(N).fill(null));
-        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-          if ((r + c) % 2 === 1) {
-            if (r < 3) state.board[r][c] = { p: 0, king: false };
-            else if (r > 4) state.board[r][c] = { p: 1, king: false };
-          }
+
+      const key = (x, y, z) => x + ',' + y + ',' + z;
+      const add = (c, d) => [c[0] + d[0], c[1] + d[1], c[2] + d[2]];
+      const boardSet = new Set();
+      const START = { 0: [], 1: [] };
+      const GOAL = { 0: [], 1: [] };
+
+      function buildBoard() {
+        boardSet.clear(); START[0].length = 0; START[1].length = 0; GOAL[0].length = 0; GOAL[1].length = 0;
+        for (let x = -4; x <= 4; x++) for (let y = -4; y <= 4; y++) {
+          const z = -x - y;
+          if (Math.abs(z) <= 4) boardSet.add(key(x, y, z));
         }
-        state.cur = 0; state.sel = null; state.targets = []; state.over = false;
+        const pts = [
+          ['x', 5, 8, -4, 0], ['x', -8, -5, 0, 4],
+          ['y', 5, 8, -4, 0], ['y', -8, -5, 0, 4],
+          ['z', 5, 8, -4, 0], ['z', -8, -5, 0, 4]
+        ];
+        pts.forEach(([axis, a, b, lo, hi]) => {
+          for (let v = a; v <= b; v++) {
+            for (let o1 = lo; o1 <= hi; o1++) {
+              const o2 = -v - o1;
+              if (o2 < lo || o2 > hi) continue;
+              let x, y, z;
+              if (axis === 'x') { x = v; y = o1; z = o2; }
+              else if (axis === 'y') { y = v; x = o1; z = o2; }
+              else { z = v; x = o1; y = o2; }
+              const k = key(x, y, z);
+              boardSet.add(k);
+              if (axis === 'x') {
+                if (a === 5) { START[1].push(k); GOAL[0].push(k); }
+                else { START[0].push(k); GOAL[1].push(k); }
+              }
+            }
+          }
+        });
+      }
+
+      let pieces = {}, cur = 0, sel = null, steps = [], jumps = [], over = false, layout = [];
+      const toCell = (k) => k.split(',').map(Number);
+      const isEmpty = (k) => pieces[k] === undefined;
+
+      function reset() {
+        pieces = {};
+        buildBoard();
+        START[0].forEach((k) => { pieces[k] = 0; });
+        START[1].forEach((k) => { pieces[k] = 1; });
+        cur = 0; sel = null; steps = []; jumps = []; over = false;
         update(); draw();
       }
-      function dirs(pc) {
-        const d = pc.p === 0 ? 1 : -1;
-        return pc.king ? [[d, -1], [d, 1], [-d, -1], [-d, 1]] : [[d, -1], [d, 1]];
+
+      function stepsFor(cell) {
+        return DIRS.map((d) => add(cell, d))
+          .map((n) => key(n[0], n[1], n[2]))
+          .filter((k) => boardSet.has(k) && isEmpty(k));
       }
-      function jumpPaths(r, c) {
-        const pc = state.board[r][c]; if (!pc) return [];
-        const out = [];
-        for (const [dr, dc] of dirs(pc)) {
-          const mr = r + dr, mc = c + dc, lr = r + 2 * dr, lc = c + 2 * dc;
-          if (!inB(lr, lc) || !state.board[mr][mc] || state.board[mr][mc].p === pc.p || state.board[lr][lc]) continue;
-          const cap = state.board[mr][mc];
-          state.board[lr][lc] = pc; state.board[r][c] = null; state.board[mr][mc] = null;
-          const subs = jumpPaths(lr, lc);
-          if (!subs.length) out.push([{ r: lr, c: lc, cap: [mr, mc] }]);
-          else subs.forEach((s) => out.push([{ r: lr, c: lc, cap: [mr, mc] }].concat(s)));
-          state.board[r][c] = pc; state.board[lr][lc] = null; state.board[mr][mc] = cap;
-        }
-        return out;
-      }
-      function allCaptures(p) {
-        const list = [];
-        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-          const pc = state.board[r][c];
-          if (pc && pc.p === p) jumpPaths(r, c).forEach((path) => list.push({ from: [r, c], path }));
-        }
-        return list;
-      }
-      function simpleTargets(r, c) {
-        const pc = state.board[r][c], out = [];
-        for (const [dr, dc] of dirs(pc)) {
-          const rr = r + dr, cc = c + dc;
-          if (inB(rr, cc) && !state.board[rr][cc]) out.push([rr, cc]);
-        }
-        return out;
-      }
-      function select(r, c) {
-        const pc = state.board[r][c];
-        if (pc && pc.p === state.cur) {
-          const caps = allCaptures(state.cur);
-          if (caps.length) {
-            const mine = caps.filter((m) => m.from[0] === r && m.from[1] === c);
-            state.sel = [r, c];
-            state.targets = mine.map((m) => { const t = m.path[m.path.length - 1]; return [t.r, t.c]; });
-          } else {
-            state.sel = [r, c]; state.targets = simpleTargets(r, c);
+
+      function jumpsFor(cell) {
+        const results = [];
+        function dfs(pos, path, visited) {
+          let jumped = false;
+          for (const d of DIRS) {
+            const over = add(pos, d), land = add(over, d);
+            const ok = key(over[0], over[1], over[2]), lk = key(land[0], land[1], land[2]);
+            if (boardSet.has(ok) && !isEmpty(ok) && boardSet.has(lk) && isEmpty(lk) && !visited.has(lk)) {
+              jumped = true;
+              const nv = new Set(visited); nv.add(lk);
+              dfs(land, path.concat([lk]), nv);
+            }
           }
-        } else { state.sel = null; state.targets = []; }
+          if (!jumped && path.length) results.push(path);
+        }
+        dfs(cell, [], new Set([key(cell[0], cell[1], cell[2])]));
+        return results;
+      }
+
+      function inGoal(p, k) {
+        const x = toCell(k)[0];
+        return p === 0 ? (x >= 5 && x <= 8) : (x <= -5 && x >= -8);
+      }
+
+      function won(p) {
+        return Object.keys(pieces).filter((k) => pieces[k] === p).every((k) => inGoal(p, k));
+      }
+
+      function select(cell) {
+        const k = key(cell[0], cell[1], cell[2]);
+        if (pieces[k] === cur) {
+          sel = cell; steps = stepsFor(cell); jumps = jumpsFor(cell);
+        } else { sel = null; steps = []; jumps = []; }
         draw();
       }
-      function moveTo(r, c) {
-        if (!state.sel) return;
-        const [fr, fc] = state.sel;
-        const caps = allCaptures(state.cur);
-        const move = caps.find((m) => m.from[0] === fr && m.from[1] === fc && m.path[m.path.length - 1].r === r && m.path[m.path.length - 1].c === c);
-        if (move) {
-          const pc = state.board[fr][fc];
-          move.path.forEach((st) => { state.board[st.cap[0]][st.cap[1]] = null; });
-          state.board[fr][fc] = null; state.board[r][c] = pc;
-          if (!pc.king && (r === 0 || r === N - 1)) pc.king = true;
-        } else if (!caps.length && state.targets.some(([tr, tc]) => tr === r && tc === c)) {
-          const pc = state.board[fr][fc]; state.board[fr][fc] = null; state.board[r][c] = pc;
-          if (!pc.king && (r === 0 || r === N - 1)) pc.king = true;
-        } else return;
-        state.sel = null; state.targets = [];
-        const opp = 1 - state.cur;
-        const oppPieces = state.board.flat().filter((pc) => pc && pc.p === opp).length;
-        if (!oppPieces) { state.over = true; playWin(); update(); draw(); dialog((state.cur === 0 ? '红方' : '白方') + '获胜', '吃光对方棋子，恭喜！', { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame }); return; }
-        state.cur = opp; playTap(); update(); draw();
+
+      function moveTo(targetKey) {
+        if (!sel) return;
+        const sk = key(sel[0], sel[1], sel[2]);
+        if (steps.indexOf(targetKey) >= 0) {
+          delete pieces[sk]; pieces[targetKey] = cur;
+        } else {
+          const j = jumps.find((path) => path[path.length - 1] === targetKey);
+          if (!j) return;
+          delete pieces[sk]; pieces[targetKey] = cur;
+        }
+        sel = null; steps = []; jumps = [];
+        if (won(cur)) {
+          over = true; playWin(); update(); draw();
+          dialog((cur === 0 ? '红方' : '蓝方') + '获胜', '全部棋子到达对面营地，恭喜！', { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame });
+          return;
+        }
+        cur = 1 - cur; playTap(); update(); draw();
       }
+
       function update() {
-        status.textContent = state.over ? '对局结束' : (state.cur === 0 ? '● 红方' : '○ 白方') + '回合';
-        const caps = allCaptures(state.cur);
-        if (!state.over && caps.length) status.textContent += ' · 可吃子';
+        status.textContent = over ? '对局结束' : ((cur === 0 ? '● 红方' : '○ 蓝方') + '回合 · 把棋子走到对面营地');
       }
+
+      function computeLayout() {
+        const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
+        const raw = [];
+        boardSet.forEach((k) => {
+          const c = toCell(k);
+          const px = Math.sqrt(3) * (c[0] + c[2] / 2);
+          const py = 1.5 * c[2];
+          raw.push({ k, c, px, py });
+        });
+        const xs = raw.map((o) => o.px), ys = raw.map((o) => o.py);
+        const minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+        const minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+        const bw = maxX - minX || 1, bh = maxY - minY || 1;
+        const PAD = 24;
+        const scale = Math.min((w - PAD * 2) / bw, (h - PAD * 2) / bh);
+        const ox = (w - bw * scale) / 2 - minX * scale;
+        const oy = (h - bh * scale) / 2 - minY * scale;
+        layout = raw.map((o) => ({ k: o.k, x: o.px * scale + ox, y: o.py * scale + oy, r: scale * 0.42 }));
+      }
+
       function draw() {
+        computeLayout();
         const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
         ctx.clearRect(0, 0, w, h);
-        const side = Math.min(w, h), cell = side / N, ox = (w - side) / 2, oy = (h - side) / 2;
-        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-          ctx.fillStyle = (r + c) % 2 ? '#c89b64' : '#f1e2c7';
-          ctx.fillRect(ox + c * cell, oy + r * cell, cell, cell);
-        }
-        if (state.sel) {
-          ctx.strokeStyle = '#d98e3b'; ctx.lineWidth = 4;
-          ctx.strokeRect(ox + state.sel[1] * cell + 2, oy + state.sel[0] * cell + 2, cell - 4, cell - 4);
-        }
-        state.targets.forEach(([r, c]) => {
-          ctx.fillStyle = 'rgba(217,142,59,0.5)';
-          ctx.beginPath(); ctx.arc(ox + c * cell + cell / 2, oy + r * cell + cell / 2, cell * 0.16, 0, Math.PI * 2); ctx.fill();
+        const pos = {};
+        layout.forEach((o) => { pos[o.k] = o; });
+        layout.forEach((o) => {
+          ctx.fillStyle = '#d8c49a';
+          ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = '#a97c50'; ctx.lineWidth = 1; ctx.stroke();
         });
-        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-          const pc = state.board[r][c]; if (!pc) continue;
-          const x = ox + c * cell + cell / 2, y = oy + r * cell + cell / 2;
-          ctx.fillStyle = pc.p === 0 ? '#c9573f' : '#f4eee2';
-          ctx.strokeStyle = '#4a4038'; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(x, y, cell * 0.38, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-          if (pc.king) { ctx.fillStyle = '#d98e3b'; ctx.beginPath(); ctx.arc(x, y, cell * 0.16, 0, Math.PI * 2); ctx.fill(); }
+        const selKey = sel ? key(sel[0], sel[1], sel[2]) : null;
+        if (selKey && pos[selKey]) {
+          ctx.strokeStyle = '#d98e3b'; ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.arc(pos[selKey].x, pos[selKey].y, pos[selKey].r * 1.25, 0, Math.PI * 2); ctx.stroke();
         }
+        steps.forEach((k) => { const o = pos[k]; if (o) { ctx.fillStyle = 'rgba(217,142,59,0.65)'; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.55, 0, Math.PI * 2); ctx.fill(); } });
+        jumps.forEach((path) => { const o = pos[path[path.length - 1]]; if (o) { ctx.strokeStyle = 'rgba(217,142,59,0.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.6, 0, Math.PI * 2); ctx.stroke(); } });
+        layout.forEach((o) => {
+          const p = pieces[o.k];
+          if (p === undefined) return;
+          ctx.fillStyle = p === 0 ? '#c9573f' : '#5b86c5';
+          ctx.strokeStyle = '#4a4038'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        });
       }
+
       function pointer(evt) {
         evt.preventDefault();
-        const sq = squareFromEvent(canvas, N, evt); if (!sq) return;
-        const { r, c } = sq;
-        const pc = state.board[r][c];
-        if (state.sel && state.targets.some(([tr, tc]) => tr === r && tc === c)) moveTo(r, c);
-        else if (pc && pc.p === state.cur) select(r, c);
-        else { state.sel = null; state.targets = []; draw(); }
+        computeLayout();
+        const rect = canvas.getBoundingClientRect();
+        const cx = evt.clientX - rect.left, cy = evt.clientY - rect.top;
+        let best = null, bd = Infinity;
+        layout.forEach((o) => { const d = Math.hypot(o.x - cx, o.y - cy); if (d < bd) { bd = d; best = o; } });
+        if (!best || bd > best.r * 1.35) return;
+        const k = best.k;
+        if (sel && (steps.indexOf(k) >= 0 || jumps.some((p) => p[p.length - 1] === k))) moveTo(k);
+        else if (pieces[k] === cur) select(toCell(k));
+        else { sel = null; steps = []; jumps = []; draw(); }
       }
+
       canvas.addEventListener('pointerdown', pointer);
       reset();
       return { destroy() { destroy(); canvas.removeEventListener('pointerdown', pointer); } };
@@ -572,7 +630,7 @@
   Hub.register({
     id: 'memory', name: '记忆翻牌', icon: '🃏', mode: 'duo', sub: '双人轮流 · 比谁配对多',
     build(host) {
-      const EMOJI = ['🍎', '🍊', '🍋', '🍇', '⭐', '🌙', '🔥', '🌸'];
+      const EMOJI = ['●', '■', '▲', '◆', '★', '♥', '♠', '♦'];
       const status = el('div', 'status-line'); host.appendChild(status);
       const hud = el('div', 'hud'); host.appendChild(hud);
       const p1 = el('div', 'hud-box', ''); const p2 = el('div', 'hud-box', '');
@@ -632,9 +690,11 @@
 
   /* ============================ 6. 猜数字 ============================ */
   Hub.register({
-    id: 'guess', name: '猜数字', icon: '❓', mode: 'solo', sub: '单人 · 几A几B 推理',
+    id: 'guess', name: '猜数字', icon: '❓', mode: 'solo', sub: '单人 · 猜4位数字（几A几B）',
     build(host) {
       const status = el('div', 'status-line'); host.appendChild(status);
+      const rules = el('div', 'controls-note', '电脑想好 4 位不重复数字（1-9）。你输入 4 个数字后点「确定」：A＝数字和位置都对，B＝数字对但位置错。10 次内猜中即胜。');
+      host.appendChild(rules);
       const panel = el('div', 'panel'); host.appendChild(panel);
       const row = el('div', 'guess-row'); panel.appendChild(row);
       const hist = el('div', 'guess-history'); panel.appendChild(hist);
@@ -765,88 +825,6 @@
       window.addEventListener('keydown', key);
       reset();
       return { destroy() { window.removeEventListener('keydown', key); } };
-    }
-  });
-
-  /* ============================ 8. 扫雷 ============================ */
-  Hub.register({
-    id: 'mines', name: '扫雷', icon: '💣', mode: 'solo', sub: '单人 · 9×9 10雷',
-    build(host) {
-      const N = 9, M = 10;
-      const hud = el('div', 'hud'); host.appendChild(hud);
-      const modeBox = el('div', 'hud-box', ''); hud.appendChild(modeBox);
-      const status = el('div', 'status-line'); host.appendChild(status);
-      const panel = el('div', 'panel'); host.appendChild(panel);
-      const grid = el('div', 'grid'); grid.style.gridTemplateColumns = 'repeat(9,1fr)'; grid.style.maxWidth = '440px'; panel.appendChild(grid);
-      const actions = el('div', 'actions'); const flag = el('button', 'btn', '翻开/标旗'); const restart = el('button', 'btn primary', '重新开始');
-      actions.append(flag, restart); panel.appendChild(actions);
-      let mines = [], revealed = [], flags = [], over = false, started = false, flagMode = false;
-      const cells = [];
-      for (let i = 0; i < N * N; i++) {
-        const c = el('button', 'cell'); c.type = 'button'; c.style.fontSize = '16px';
-        c.addEventListener('click', () => tap(i)); grid.appendChild(c); cells.push(c);
-      }
-      flag.addEventListener('click', () => { flagMode = !flagMode; modeBox.innerHTML = '模式<b>' + (flagMode ? '标旗' : '翻开') + '</b>'; });
-      restart.addEventListener('click', reset);
-      function reset() {
-        mines = []; revealed = Array(N * N).fill(false); flags = []; over = false; started = false;
-        render(); update();
-      }
-      function placeMines(safe) {
-        const blocked = new Set([safe]);
-        const nears = around(safe).map((i) => i);
-        nears.forEach((i) => blocked.add(i));
-        while (mines.length < M) {
-          const i = Math.floor(Math.random() * N * N);
-          if (!blocked.has(i) && !mines.includes(i)) mines.push(i);
-        }
-      }
-      function around(i) {
-        const r = Math.floor(i / N), c = i % N, out = [];
-        for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-          if (!dr && !dc) continue;
-          const rr = r + dr, cc = c + dc;
-          if (rr >= 0 && rr < N && cc >= 0 && cc < N) out.push(rr * N + cc);
-        }
-        return out;
-      }
-      function count(i) {
-        return around(i).filter((j) => mines.includes(j)).length;
-      }
-      function reveal(i) {
-        if (revealed[i] || flags.includes(i) || over) return;
-        revealed[i] = true;
-        if (mines.includes(i)) { over = true; playLose(); render(); update(); dialog('踩雷了', '游戏结束。', { confirm: '再来一局', onConfirm: reset }); return; }
-        if (count(i) === 0) around(i).forEach(reveal);
-        if (revealed.filter(Boolean).length === N * N - M) { over = true; playWin(); render(); update(); dialog('扫雷成功', '全部安全格已翻开！', { confirm: '再来一局', onConfirm: reset }); return; }
-      }
-      function tap(i) {
-        if (over) return;
-        if (!started) { placeMines(i); started = true; }
-        if (flagMode) {
-          if (revealed[i]) return;
-          const k = flags.indexOf(i);
-          if (k >= 0) flags.splice(k, 1); else flags.push(i);
-          playTap(); render(); update();
-        } else {
-          if (flags.includes(i)) return;
-          playTap(); reveal(i); render(); update();
-        }
-      }
-      function update() {
-        status.textContent = over ? '结束' : ('剩余雷 ' + (M - flags.length));
-        modeBox.innerHTML = '模式<b>' + (flagMode ? '标旗' : '翻开') + '</b>';
-      }
-      function render() {
-        cells.forEach((c, i) => {
-          if (flags.includes(i)) { c.textContent = '🚩'; c.style.background = '#fbe8d3'; }
-          else if (!revealed[i]) { c.textContent = ''; c.style.background = ''; }
-          else if (mines.includes(i)) { c.textContent = '💣'; c.style.background = '#f3c9c9'; }
-          else { const n = count(i); c.textContent = n || ''; c.style.background = '#fffdf8'; c.style.color = ['', '#4a90d9', '#3f9a52', '#d9534f', '#7b4fb5'][n] || ''; }
-        });
-      }
-      reset();
-      return { destroy() {} };
     }
   });
 
@@ -988,6 +966,392 @@
       z2.addEventListener('pointerdown', (e) => { e.preventDefault(); hit(1); });
       reset();
       return { destroy() { clearTimeout(timeout); clearTimeout(flashTimer); } };
+    }
+  });
+
+  /* ============================ 11. 中国象棋 ============================ */
+  Hub.register({
+    id: 'xiangqi', name: '中国象棋', icon: '帅', mode: 'duo', sub: '同屏双人 · 9×10',
+    build(host) {
+      const R = 10, C = 9;
+      const CH = { k: ['帅', '将'], a: ['仕', '士'], e: ['相', '象'], h: ['马', '马'], r: ['车', '车'], c: ['炮', '炮'], p: ['兵', '卒'] };
+      const status = el('div', 'status-line'); host.appendChild(status);
+      const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
+      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
+      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
+      const { ctx, resize, destroy } = canvasGame(canvas, draw);
+
+      let board = [], turn = 'r', sel = null, selMoves = [], over = false, lastMove = null, checkPos = null;
+      const P = (type, color) => ({ type, color });
+      const other = (s) => (s === 'r' ? 'b' : 'r');
+      const inB = (r, c) => r >= 0 && r < R && c >= 0 && c < C;
+      const inPalace = (r, c, s) => c >= 3 && c <= 5 && (s === 'r' ? r >= 7 : r <= 2);
+
+      function reset() {
+        board = Array.from({ length: R }, () => Array(C).fill(null));
+        const back = ['r', 'h', 'e', 'a', 'k', 'a', 'e', 'h', 'r'];
+        for (let c = 0; c < C; c++) { board[0][c] = P(back[c], 'b'); board[9][c] = P(back[c], 'r'); }
+        board[2][1] = P('c', 'b'); board[2][7] = P('c', 'b');
+        board[7][1] = P('c', 'r'); board[7][7] = P('c', 'r');
+        for (let c = 0; c < C; c += 2) { board[3][c] = P('p', 'b'); board[6][c] = P('p', 'r'); }
+        turn = 'r'; sel = null; selMoves = []; over = false; lastMove = null; checkPos = null;
+        update(); draw();
+      }
+
+      function clone(b) { return b.map((row) => row.slice()); }
+
+      function genPseudo(b, r, c) {
+        const p = b[r][c]; if (!p) return [];
+        const s = p.color, dir = s === 'r' ? -1 : 1, moves = [];
+        const cross = s === 'r' ? r <= 4 : r >= 5;
+        const push = (rr, cc) => { if (inB(rr, cc) && (!b[rr][cc] || b[rr][cc].color !== s)) moves.push([rr, cc]); };
+        if (p.type === 'k') {
+          [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dr, dc]) => { if (inPalace(r + dr, c + dc, s)) push(r + dr, c + dc); });
+        } else if (p.type === 'a') {
+          [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(([dr, dc]) => { if (inPalace(r + dr, c + dc, s)) push(r + dr, c + dc); });
+        } else if (p.type === 'e') {
+          [[-2, -2], [-2, 2], [2, -2], [2, 2]].forEach(([dr, dc]) => {
+            const rr = r + dr, cc = c + dc;
+            if (!inB(rr, cc)) return;
+            if (b[r + dr / 2][c + dc / 2]) return;
+            if (s === 'r' ? rr <= 4 : rr >= 5) return;
+            push(rr, cc);
+          });
+        } else if (p.type === 'h') {
+          [[-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2]].forEach(([dr, dc]) => {
+            const rr = r + dr, cc = c + dc;
+            if (!inB(rr, cc)) return;
+            const lr = r + (Math.abs(dr) === 2 ? dr / 2 : 0);
+            const lc = c + (Math.abs(dc) === 2 ? dc / 2 : 0);
+            if (b[lr][lc]) return;
+            push(rr, cc);
+          });
+        } else if (p.type === 'r' || p.type === 'c') {
+          [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dr, dc]) => {
+            let rr = r + dr, cc = c + dc, screen = false;
+            while (inB(rr, cc)) {
+              if (p.type === 'r') {
+                if (!b[rr][cc]) moves.push([rr, cc]);
+                else { if (b[rr][cc].color !== s) moves.push([rr, cc]); break; }
+              } else {
+                if (!screen) {
+                  if (!b[rr][cc]) moves.push([rr, cc]); else screen = true;
+                } else if (b[rr][cc]) { if (b[rr][cc].color !== s) moves.push([rr, cc]); break; }
+              }
+              rr += dr; cc += dc;
+            }
+          });
+        } else if (p.type === 'p') {
+          push(r + dir, c);
+          if (cross) { push(r, c - 1); push(r, c + 1); }
+        }
+        return moves;
+      }
+
+      function findGeneral(b, s) {
+        for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) if (b[r][c] && b[r][c].type === 'k' && b[r][c].color === s) return [r, c];
+        return null;
+      }
+
+      function isAttacked(b, r, c, by) {
+        for (let rr = 0; rr < R; rr++) for (let cc = 0; cc < C; cc++) {
+          const p = b[rr][cc]; if (!p || p.color !== by) continue;
+          if (p.type === 'k' && cc === c) {
+            let blocked = false;
+            for (let m = Math.min(rr, r) + 1; m < Math.max(rr, r); m++) if (b[m][cc]) blocked = true;
+            if (!blocked) return true;
+          }
+          if (genPseudo(b, rr, cc).some(([mr, mc]) => mr === r && mc === c)) return true;
+        }
+        return false;
+      }
+
+      function inCheck(b, s) { const g = findGeneral(b, s); return g ? isAttacked(b, g[0], g[1], other(s)) : false; }
+
+      function genLegal(b, s) {
+        const out = [];
+        for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+          const p = b[r][c]; if (!p || p.color !== s) continue;
+          genPseudo(b, r, c).forEach(([tr, tc]) => {
+            const nb = clone(b); nb[tr][tc] = p; nb[r][c] = null;
+            if (!inCheck(nb, s)) out.push({ from: [r, c], to: [tr, tc] });
+          });
+        }
+        return out;
+      }
+
+      function select(r, c) {
+        const p = board[r][c];
+        if (p && p.color === turn) {
+          sel = [r, c];
+          selMoves = genLegal(board, turn).filter((m) => m.from[0] === r && m.from[1] === c).map((m) => m.to);
+        } else { sel = null; selMoves = []; }
+        draw();
+      }
+
+      function moveTo(tr, tc) {
+        if (!sel) return;
+        const [fr, fc] = sel;
+        if (!selMoves.some(([r, c]) => r === tr && c === tc)) return;
+        const p = board[fr][fc];
+        board[tr][tc] = p; board[fr][fc] = null; lastMove = [fr, fc, tr, tc];
+        sel = null; selMoves = [];
+        turn = other(turn);
+        const legal = genLegal(board, turn);
+        const chk = inCheck(board, turn);
+        checkPos = chk ? findGeneral(board, turn) : null;
+        if (!legal.length) {
+          over = true; playWin(); update(); draw();
+          dialog(chk ? (other(turn) === 'r' ? '红方获胜' : '黑方获胜') : '平局', chk ? '将死！' : '困毙（无棋可走）。', { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame });
+          return;
+        }
+        playTap(); update(); draw();
+      }
+
+      function update() {
+        if (over) { status.textContent = '对局结束'; return; }
+        status.textContent = (turn === 'r' ? '红方' : '黑方') + '回合' + (checkPos ? ' · 将军！' : '');
+        status.style.color = checkPos ? '#d98e3b' : '#4a4038';
+      }
+
+      function layout(w, h) {
+        const PAD = 26, gx = (w - PAD * 2) / 8, gy = (h - PAD * 2) / 9;
+        const X = (c) => PAD + c * gx, Y = (r) => PAD + r * gy;
+        return { gx, gy, X, Y };
+      }
+
+      function draw() {
+        const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        const { gx, gy, X, Y } = layout(w, h);
+        ctx.strokeStyle = '#a97c50'; ctx.lineWidth = 1.6;
+        for (let c = 0; c < C; c++) { ctx.beginPath(); ctx.moveTo(X(c), Y(0)); ctx.lineTo(X(c), Y(9)); ctx.stroke(); }
+        for (let r = 0; r < R; r++) {
+          if (r === 0) { ctx.beginPath(); ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(8), Y(0)); ctx.stroke(); }
+          else if (r === 9) { ctx.beginPath(); ctx.moveTo(X(0), Y(9)); ctx.lineTo(X(8), Y(9)); ctx.stroke(); }
+          else if (r < 5) { ctx.beginPath(); ctx.moveTo(X(0), Y(r)); ctx.lineTo(X(4), Y(r)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(X(4), Y(r)); ctx.lineTo(X(8), Y(r)); ctx.stroke(); }
+          else { ctx.beginPath(); ctx.moveTo(X(0), Y(r)); ctx.lineTo(X(8), Y(r)); ctx.stroke(); }
+        }
+        // 宫斜线
+        ctx.lineWidth = 1.2;
+        [[0, 3], [7, 3]].forEach(([rr, cc]) => {
+          ctx.beginPath(); ctx.moveTo(X(cc), Y(rr)); ctx.lineTo(X(cc + 2), Y(rr + 2)); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(X(cc + 2), Y(rr)); ctx.lineTo(X(cc), Y(rr + 2)); ctx.stroke();
+        });
+        ctx.fillStyle = '#a97c50'; ctx.font = '600 ' + Math.round(gy * 0.45) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('楚 河', X(1.5), Y(4.5));
+        ctx.fillText('汉 界', X(6.5), Y(4.5));
+        // 移动提示
+        if (sel) { ctx.fillStyle = 'rgba(217,142,59,0.25)'; ctx.fillRect(X(sel[1]) - gx * 0.42, Y(sel[0]) - gy * 0.42, gx * 0.84, gy * 0.84); }
+        selMoves.forEach(([r, c]) => { ctx.fillStyle = 'rgba(217,142,59,0.7)'; ctx.beginPath(); ctx.arc(X(c), Y(r), Math.min(gx, gy) * 0.16, 0, Math.PI * 2); ctx.fill(); });
+        if (checkPos) { ctx.fillStyle = 'rgba(217,142,59,0.35)'; ctx.beginPath(); ctx.arc(X(checkPos[1]), Y(checkPos[0]), Math.min(gx, gy) * 0.42, 0, Math.PI * 2); ctx.fill(); }
+        // 棋子
+        const r0 = Math.min(gx, gy) * 0.42;
+        for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+          const p = board[r][c]; if (!p) continue;
+          const x = X(c), y = Y(r);
+          ctx.fillStyle = '#f4e7c8'; ctx.strokeStyle = p.color === 'r' ? '#b94b3d' : '#3b3a36'; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(x, y, r0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = p.color === 'r' ? '#b94b3d' : '#3b3a36';
+          ctx.font = '700 ' + Math.round(r0 * 1.15) + 'px "PingFang SC","Noto Sans CJK SC",sans-serif';
+          ctx.fillText(CH[p.type][p.color === 'r' ? 0 : 1], x, y + 1);
+        }
+      }
+
+      function pointer(evt) {
+        evt.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const { gx, gy, X, Y } = layout(rect.width, rect.height);
+        const px = evt.clientX - rect.left, py = evt.clientY - rect.top;
+        let best = null, bd = Infinity;
+        for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+          const d = Math.hypot(X(c) - px, Y(r) - py);
+          if (d < bd) { bd = d; best = [r, c]; }
+        }
+        if (!best || bd > Math.min(gx, gy) * 0.5) return;
+        const [r, c] = best;
+        if (sel && selMoves.some(([tr, tc]) => tr === r && tc === c)) moveTo(r, c);
+        else if (board[r][c] && board[r][c].color === turn) select(r, c);
+        else { sel = null; selMoves = []; draw(); }
+      }
+
+      canvas.addEventListener('pointerdown', pointer);
+      reset();
+      return { destroy() { destroy(); canvas.removeEventListener('pointerdown', pointer); } };
+    }
+  });
+
+  /* ============================ 12. 国际象棋 ============================ */
+  Hub.register({
+    id: 'chess', name: '国际象棋', icon: '♞', mode: 'duo', sub: '同屏双人 · 8×8',
+    build(host) {
+      const N = 8;
+      const LETTER = { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N', p: 'P' };
+      const status = el('div', 'status-line'); host.appendChild(status);
+      const wrap = el('div', 'board-wrap'); const canvas = makeCanvas(); wrap.appendChild(canvas); host.appendChild(wrap);
+      const actions = el('div', 'actions'); const restart = el('button', 'btn primary', '重新开始');
+      actions.appendChild(restart); host.appendChild(actions); restart.addEventListener('click', reset);
+      const { ctx, resize, destroy } = canvasGame(canvas, draw);
+
+      let board = [], turn = 'w', sel = null, selMoves = [], over = false, lastMove = null, checkPos = null;
+      const P = (type, color) => ({ type, color });
+      const other = (s) => (s === 'w' ? 'b' : 'w');
+      const inB = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
+
+      function reset() {
+        board = Array.from({ length: N }, () => Array(N).fill(null));
+        const back = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+        for (let c = 0; c < N; c++) { board[0][c] = P(back[c], 'b'); board[7][c] = P(back[c], 'w'); board[1][c] = P('p', 'b'); board[6][c] = P('p', 'w'); }
+        turn = 'w'; sel = null; selMoves = []; over = false; lastMove = null; checkPos = null;
+        update(); draw();
+      }
+
+      function clone(b) { return b.map((row) => row.slice()); }
+
+      function slide(b, r, c, dirs, s, moves) {
+        dirs.forEach(([dr, dc]) => {
+          let rr = r + dr, cc = c + dc;
+          while (inB(rr, cc)) {
+            if (!b[rr][cc]) moves.push([rr, cc]);
+            else { if (b[rr][cc].color !== s) moves.push([rr, cc]); break; }
+            rr += dr; cc += dc;
+          }
+        });
+      }
+
+      function genPseudo(b, r, c) {
+        const p = b[r][c]; if (!p) return [];
+        const s = p.color, moves = [];
+        const push = (rr, cc) => { if (inB(rr, cc) && (!b[rr][cc] || b[rr][cc].color !== s)) moves.push([rr, cc]); };
+        if (p.type === 'p') {
+          const dir = s === 'w' ? -1 : 1, start = s === 'w' ? 6 : 1;
+          if (inB(r + dir, c) && !b[r + dir][c]) moves.push([r + dir, c]);
+          if (r === start && !b[r + dir][c] && !b[r + 2 * dir][c]) moves.push([r + 2 * dir, c]);
+          [[dir, -1], [dir, 1]].forEach(([dr, dc]) => { const rr = r + dr, cc = c + dc; if (inB(rr, cc) && b[rr][cc] && b[rr][cc].color !== s) moves.push([rr, cc]); });
+        } else if (p.type === 'n') {
+          [[-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2]].forEach(([dr, dc]) => push(r + dr, c + dc));
+        } else if (p.type === 'b') {
+          slide(b, r, c, [[-1, -1], [-1, 1], [1, -1], [1, 1]], s, moves);
+        } else if (p.type === 'r') {
+          slide(b, r, c, [[-1, 0], [1, 0], [0, -1], [0, 1]], s, moves);
+        } else if (p.type === 'q') {
+          slide(b, r, c, [[-1, -1], [-1, 1], [1, -1], [1, 1], [-1, 0], [1, 0], [0, -1], [0, 1]], s, moves);
+        } else if (p.type === 'k') {
+          [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]].forEach(([dr, dc]) => push(r + dr, c + dc));
+        }
+        return moves;
+      }
+
+      function findKing(b, s) {
+        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (b[r][c] && b[r][c].type === 'k' && b[r][c].color === s) return [r, c];
+        return null;
+      }
+
+      function isAttacked(b, r, c, by) {
+        for (let rr = 0; rr < N; rr++) for (let cc = 0; cc < N; cc++) {
+          const p = b[rr][cc]; if (!p || p.color !== by) continue;
+          if (genPseudo(b, rr, cc).some(([mr, mc]) => mr === r && mc === c)) return true;
+        }
+        return false;
+      }
+
+      function inCheck(b, s) { const k = findKing(b, s); return k ? isAttacked(b, k[0], k[1], other(s)) : false; }
+
+      function genLegal(b, s) {
+        const out = [];
+        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+          const p = b[r][c]; if (!p || p.color !== s) continue;
+          genPseudo(b, r, c).forEach(([tr, tc]) => {
+            const nb = clone(b); nb[tr][tc] = p; nb[r][c] = null;
+            if (!inCheck(nb, s)) out.push({ from: [r, c], to: [tr, tc] });
+          });
+        }
+        return out;
+      }
+
+      function select(r, c) {
+        const p = board[r][c];
+        if (p && p.color === turn) {
+          sel = [r, c];
+          selMoves = genLegal(board, turn).filter((m) => m.from[0] === r && m.from[1] === c).map((m) => m.to);
+        } else { sel = null; selMoves = []; }
+        draw();
+      }
+
+      function moveTo(tr, tc) {
+        if (!sel) return;
+        const [fr, fc] = sel;
+        if (!selMoves.some(([r, c]) => r === tr && c === tc)) return;
+        const p = board[fr][fc];
+        board[tr][tc] = p; board[fr][fc] = null;
+        if (p.type === 'p' && (tr === 0 || tr === 7)) { p.type = 'q'; }
+        lastMove = [fr, fc, tr, tc];
+        sel = null; selMoves = [];
+        turn = other(turn);
+        const legal = genLegal(board, turn);
+        const chk = inCheck(board, turn);
+        checkPos = chk ? findKing(board, turn) : null;
+        if (!legal.length) {
+          over = true; playWin(); update(); draw();
+          dialog(chk ? (other(turn) === 'w' ? '白方获胜' : '黑方获胜') : '平局', chk ? '将杀！' : '逼和（无棋可走）。', { confirm: '再来一局', cancel: '返回大厅', onConfirm: reset, onCancel: exitGame });
+          return;
+        }
+        playTap(); update(); draw();
+      }
+
+      function update() {
+        if (over) { status.textContent = '对局结束'; return; }
+        status.textContent = (turn === 'w' ? '白方' : '黑方') + '回合' + (checkPos ? ' · 将军！' : '');
+        status.style.color = checkPos ? '#d98e3b' : '#4a4038';
+      }
+
+      function draw() {
+        const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        const side = Math.min(w, h), cell = side / N, ox = (w - side) / 2, oy = (h - side) / 2;
+        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+          ctx.fillStyle = (r + c) % 2 ? '#a8c3a0' : '#eef3ea';
+          ctx.fillRect(ox + c * cell, oy + r * cell, cell, cell);
+        }
+        if (lastMove) {
+          ctx.fillStyle = 'rgba(217,142,59,0.28)';
+          ctx.fillRect(ox + lastMove[1] * cell, oy + lastMove[0] * cell, cell, cell);
+          ctx.fillRect(ox + lastMove[3] * cell, oy + lastMove[2] * cell, cell, cell);
+        }
+        if (sel) { ctx.fillStyle = 'rgba(217,142,59,0.35)'; ctx.fillRect(ox + sel[1] * cell, oy + sel[0] * cell, cell, cell); }
+        selMoves.forEach(([r, c]) => {
+          if (board[r][c]) { ctx.strokeStyle = 'rgba(217,142,59,0.9)'; ctx.lineWidth = 4; ctx.strokeRect(ox + c * cell + 3, oy + r * cell + 3, cell - 6, cell - 6); }
+          else { ctx.fillStyle = 'rgba(217,142,59,0.7)'; ctx.beginPath(); ctx.arc(ox + c * cell + cell / 2, oy + r * cell + cell / 2, cell * 0.14, 0, Math.PI * 2); ctx.fill(); }
+        });
+        if (checkPos) { ctx.fillStyle = 'rgba(217,142,59,0.45)'; ctx.fillRect(ox + checkPos[1] * cell, oy + checkPos[0] * cell, cell, cell); }
+        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+          const p = board[r][c]; if (!p) continue;
+          const x = ox + c * cell + cell / 2, y = oy + r * cell + cell / 2, rr = cell * 0.42;
+          ctx.fillStyle = p.color === 'w' ? '#fdfbf5' : '#3b3a36';
+          ctx.strokeStyle = p.color === 'w' ? '#3b3a36' : '#fdfbf5'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = p.color === 'w' ? '#3b3a36' : '#fdfbf5';
+          ctx.font = '700 ' + Math.round(cell * 0.52) + 'px Georgia,serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(LETTER[p.type], x, y + cell * 0.02);
+        }
+      }
+
+      function pointer(evt) {
+        evt.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const side = Math.min(rect.width, rect.height), cell = side / N;
+        const ox = (rect.width - side) / 2, oy = (rect.height - side) / 2;
+        const px = evt.clientX - rect.left, py = evt.clientY - rect.top;
+        const c = Math.floor((px - ox) / cell), r = Math.floor((py - oy) / cell);
+        if (!inB(r, c)) return;
+        if (sel && selMoves.some(([tr, tc]) => tr === r && tc === c)) moveTo(r, c);
+        else if (board[r][c] && board[r][c].color === turn) select(r, c);
+        else { sel = null; selMoves = []; draw(); }
+      }
+
+      canvas.addEventListener('pointerdown', pointer);
+      reset();
+      return { destroy() { destroy(); canvas.removeEventListener('pointerdown', pointer); } };
     }
   });
 
