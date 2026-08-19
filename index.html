@@ -17,37 +17,29 @@
         <div class="cover">
           <div>
             <h1>本机小游戏</h1>
-            <p class="subtitle">离线 · 同屏双人 · 轻快开玩</p>
+            <p class="subtitle">离线 · 同屏双人 · 单人经典</p>
           </div>
-          <div class="cover-badge">五</div>
+          <div class="cover-badge">游</div>
         </div>
-        <h2 class="section-title">选择游戏</h2>
-        <button id="gomoku-card" class="game-card" type="button">
-          <span class="game-icon">● ○</span>
-          <span class="game-info">
-            <span class="game-name">五子棋</span>
-            <span class="game-sub">本地双人 · 15×15</span>
-          </span>
-          <span class="game-arrow">›</span>
-        </button>
-        <p class="footer">本地双人 · 无需网络</p>
+
+        <div class="tabs" id="lobby-tabs">
+          <button class="tab active" data-tab="all" type="button">全部</button>
+          <button class="tab" data-tab="duo" type="button">双人</button>
+          <button class="tab" data-tab="solo" type="button">单人</button>
+        </div>
+
+        <div id="game-list" class="game-list"></div>
+        <p class="footer">无需网络 · 首次加载后离线可玩</p>
       </div>
     </section>
 
     <section id="game" class="screen hidden">
       <header class="game-top">
         <button id="back-btn" class="btn ghost" type="button">‹ 大厅</button>
-        <h2 class="game-title">五子棋</h2>
+        <h2 id="game-title">游戏</h2>
         <div class="top-spacer"></div>
       </header>
-      <div id="turn-label" class="turn-label">● 黑方回合</div>
-      <div class="board-wrap">
-        <canvas id="board"></canvas>
-      </div>
-      <div class="actions">
-        <button id="undo-btn" class="btn" type="button" disabled>悔棋</button>
-        <button id="restart-btn" class="btn primary" type="button">重新开始</button>
-      </div>
+      <div id="game-body"></div>
     </section>
   </div>
 
