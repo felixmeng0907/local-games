@@ -83,6 +83,15 @@
     $('game').classList.toggle('hidden', name !== 'game');
   }
 
+  const RULES = {
+    gomoku: '黑白双方轮流落子。\n先在横、竖或斜向连成五子者获胜。',
+    tictactoe: '双方轮流在 3×3 格中落子。\n先连成一线（横、竖、斜）者获胜。',
+    othello: '黑白轮流落子，落子后夹住的对方棋子会翻成己方颜色。\n棋盘下满后，棋子多者获胜。',
+    chinesecheckers: '点击己方棋子选中，再点高亮位置移动。\n可隔子连跳、不吞子；先把全部棋子走到对面营地者胜。',
+    xiangqi: '双方轮流走子，目标是将死对方将/帅。\n点击己方棋子可查看可走位置。',
+    chess: '双方轮流走子，目标是将死对方王。\n点击己方棋子可查看可走位置。'
+  };
+
   function renderLobby() {
     const list = $('game-list');
     list.innerHTML = '';
@@ -90,7 +99,18 @@
       const card = el('button', 'game-card');
       card.type = 'button';
       card.appendChild(el('span', 'game-icon', g.icon));
-      card.appendChild(el('span', 'game-name', g.name));
+      const info = el('span', 'game-info');
+      info.appendChild(el('span', 'game-name', g.name));
+      const ruleBtn = el('span', 'rule-btn', '?');
+      ruleBtn.setAttribute('role', 'button');
+      ruleBtn.setAttribute('tabindex', '0');
+      ruleBtn.setAttribute('aria-label', g.name + '规则');
+      ruleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dialog(g.name + ' 规则', RULES[g.id] || '暂无规则', { confirm: '知道了' });
+      });
+      info.appendChild(ruleBtn);
+      card.appendChild(info);
       card.addEventListener('click', () => enterGame(g.id));
       list.appendChild(card);
     });
